@@ -21,7 +21,7 @@ from PIL import Image
 import io
 
 # ---- CONFIG FTP ----
-FTP_HOST = "ftp://cftp_nicebr@ftp.drivehq.com"        # Sostituisci con il tuo host
+FTP_HOST = "ftp.drivehq.com"        # Sostituisci con il tuo host
 FTP_USER = "nicebr"           # Sostituisci
 FTP_PASS = "otl.123"           # Sostituisci
 CARTELLA_ROOT = "/"                 # o "/telecamere", se usi una sottocartella
