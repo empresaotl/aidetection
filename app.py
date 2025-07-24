@@ -1,6 +1,6 @@
 import streamlit as st
 from ftplib import FTP
-from datetime import datetime
+from datetime import datetime, timedelta
 from PIL import Image
 import io
 import re
@@ -106,7 +106,7 @@ else:
 
     for data in camere_ultime_foto.values():
         ts = data["timestamp"]
-        ore = (datetime.now() - ts).total_seconds() // 3600
+        ore = (datetime.utcnow() - timedelta(hours=3) - ts).total_seconds() // 3600
         if ore < 24:
             count_attive += 1
         else:
@@ -199,3 +199,4 @@ try:
     ftp.quit()
 except:
     pass
+
