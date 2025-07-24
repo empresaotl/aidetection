@@ -125,7 +125,7 @@ else:
         horizontal=True
     )
 
-    modo_compatto = st.checkbox("Modalità compatta (griglia)", value=False)
+    modo_compatto = st.checkbox("Modalità compatta (griglia)", value=True)
 
     if st.button("Mostra tutte le camere"):
         query = ""
@@ -190,7 +190,7 @@ else:
             cols = st.columns(len(row))
             for idx, camera in enumerate(row):
                 with cols[idx]:
-                    st.image(camera["img"], use_column_width="always")
+                    st.image(camera["img"], use_container_width=True)
                     st.markdown(f"**{camera['stato']} {camera['cam']}**")
                     st.caption(f"{camera['timestamp'].strftime('%Y-%m-%d %H:%M:%S')} • {camera['ore']}h fa")
 
@@ -199,3 +199,4 @@ try:
     ftp.quit()
 except:
     pass
+
