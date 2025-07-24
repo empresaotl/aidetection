@@ -6,7 +6,7 @@ import io
 
 # --- CONFIGURAZIONE FTP ---
 FTP_HOST = "ftp.drivehq.com"
-FTP_USER = "nicebr"
+FTP_USER = "otl.2020"
 FTP_PASS = "otl.123"
 BASE_FOLDER = "/REO_325"
 ANNO = "2025"
