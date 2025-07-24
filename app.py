@@ -1,7 +1,6 @@
-
 import streamlit as st
 from ftplib import FTP
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
 from PIL import Image
 import io
@@ -32,17 +31,17 @@ def parse_nome_camera_e_data(nome_file):
 
 # --- UI setup ---
 st.set_page_config(page_title="Dashboard Telecamere", layout="wide")
-st.title("Dashboard - Ultima immagine per telecamera")
+st.title("📸 Dashboard - Ultima immagine per telecamera")
 ora_brasile = datetime.now(pytz.timezone('America/Sao_Paulo'))
-st.caption(f"Orario di riferimento (Brasilia): {ora_brasile.strftime('%Y-%m-%d %H:%M:%S')}")
+st.caption(f"🕒 Orario di riferimento (Brasilia): {ora_brasile.strftime('%Y-%m-%d %H:%M:%S')}")
 
 # --- CONNESSIONE FTP ---
 try:
     ftp = FTP(FTP_HOST)
     ftp.login(FTP_USER, FTP_PASS)
-    st.success("Connessione FTP riuscita")
+    st.success("✅ Connessione FTP riuscita")
 except Exception as e:
-    st.error(f"Errore FTP: {e}")
+    st.error(f"❌ Errore FTP: {e}")
     st.stop()
 
 # --- RACCOLTA ultime immagini
@@ -54,11 +53,11 @@ try:
 
     for cam_folder in sorted(camere):
         cam_path = f"/{cam_folder}"
-        nome_cam_trovato = None
 
         try:
             ftp.cwd(cam_path)
             anni = sorted(ftp.nlst(), reverse=True)
+            trovata = False
 
             for anno in anni:
                 ftp.cwd(f"{cam_path}/{anno}")
@@ -70,7 +69,6 @@ try:
 
                     for giorno in giorni:
                         path_img = f"{cam_path}/{anno}/{mese}/{giorno}"
-
                         try:
                             ftp.cwd(path_img)
                             files = sorted([f for f in ftp.nlst() if f.endswith(".jpg")], reverse=True)
@@ -87,13 +85,13 @@ try:
                                     "path": path_img,
                                     "filename": ultima_img
                                 }
-                                nome_cam_trovato = nome_cam
+                                trovata = True
                                 break
                         except:
                             continue
-                    if nome_cam_trovato:
+                    if trovata:
                         break
-                if nome_cam_trovato:
+                if trovata:
                     break
         except:
             continue
@@ -101,119 +99,110 @@ try:
 except Exception as e:
     st.error(f"Errore lettura camere: {e}")
 
-# --- STATISTICHE E FILTRI ---
+# --- VISUALIZZAZIONE ---
 if not camere_ultime_foto:
-    st.warning("Nessuna immagine trovata.")
-else:
-    count_attive = 0
-    count_offline = 0
+    st.warning("⚠️ Nessuna immagine trovata.")
+    st.stop()
 
-    for data in camere_ultime_foto.values():
-        ts = data["timestamp"]
+count_attive = 0
+count_offline = 0
+brasil_tz = pytz.timezone('America/Sao_Paulo')
+now_brasil = datetime.now(brasil_tz)
 
-        brasil_tz = pytz.timezone('America/Sao_Paulo')
-        now_brasil = datetime.now(brasil_tz)
+for data in camere_ultime_foto.values():
+    ts = data["timestamp"]
+    if ts.tzinfo is None:
+        ts = brasil_tz.localize(ts)
+    ore = (now_brasil - ts).total_seconds() // 3600
+    if ore < 24:
+        count_attive += 1
+    else:
+        count_offline += 1
 
-        if ts.tzinfo is None:
-            ts = brasil_tz.localize(ts)
+st.subheader(f"Totale camere: {len(camere_ultime_foto)} | ✅ Attive: {count_attive} | 🔴 Offline: {count_offline}")
 
-        ore = (now_brasil - ts).total_seconds() // 3600
+# --- FILTRI ---
+query = st.text_input("🔎 Cerca per nome camera o cliente:", "").strip().lower()
+noms = sorted(camere_ultime_foto.keys())
+selected_cam = st.selectbox("🎯 Seleziona una camera:", ["-- Nessuna --"] + noms)
 
-        if ore < 24:
-            count_attive += 1
+filtro_offline = st.radio("🔌 Mostra solo telecamere offline (>24h)?", ["No", "Sì"], index=0, horizontal=True)
+modo_compatto = st.checkbox("📦 Modalità compatta (griglia)", value=True)
+
+if st.button("📤 Mostra tutte le camere"):
+    query = ""
+    selected_cam = "-- Nessuna --"
+
+if modo_compatto:
+    st.session_state.griglia = []
+
+# --- VISUALIZZAZIONE TELECAMERE ---
+for cam, data in sorted(camere_ultime_foto.items()):
+    ts = data["timestamp"]
+    if ts.tzinfo is None:
+        ts = brasil_tz.localize(ts)
+
+    diff_ore = (now_brasil - ts).total_seconds() // 3600
+    stato = "🟢" if diff_ore < 24 else "🔴"
+
+    if filtro_offline == "Sì" and stato == "🟢":
+        continue
+    if query and query not in cam.lower():
+        continue
+    if selected_cam != "-- Nessuna --" and cam != selected_cam:
+        continue
+
+    buffer = io.BytesIO()
+    try:
+        ftp.cwd(data["path"])
+        if data["filename"] in ftp.nlst():
+            ftp.retrbinary(f"RETR {data['filename']}", buffer.write)
         else:
-            count_offline += 1
+            raise FileNotFoundError(f"File {data['filename']} non trovato in {data['path']}")
 
-    st.subheader(f"Totale camere: {len(camere_ultime_foto)} | Attive: {count_attive} | Offline: {count_offline}")
+        buffer.seek(0)
+        image = Image.open(buffer)
 
-    query = st.text_input("Cerca per nome camera o cliente:", "").strip().lower()
-    noms = sorted(camere_ultime_foto.keys())
-    selected_cam = st.selectbox("Seleziona una camera:", ["-- Nessuna --"] + noms)
+        if modo_compatto:
+            st.session_state.griglia.append({
+                "cam": cam,
+                "img": image,
+                "stato": stato,
+                "timestamp": ts,
+                "ore": int(diff_ore)
+            })
+        else:
+            with st.container():
+                col1, col2 = st.columns([1, 2])
+                with col1:
+                    st.image(image, caption=data["filename"], width=200)
+                with col2:
+                    st.markdown(f"### {stato} {cam}")
+                    st.write(f"Ultima attività: `{ts.strftime('%Y-%m-%d %H:%M:%S')}`")
+                    st.write(f"Trascorse: `{int(diff_ore)} ore`")
+            st.markdown("---")
 
-    filtro_offline = st.radio(
-        "Mostra solo telecamere offline (>24h)?",
-        ["No", "Sì"],
-        index=0,
-        horizontal=True
-    )
+    except Exception as e:
+        st.warning(f"Errore caricando immagine '{cam}': {e}")
+        continue
 
-    modo_compatto = st.checkbox("Modalità compatta (griglia)", value=True)
+# --- GRIGLIA COMPATTA ---
+if modo_compatto and "griglia" in st.session_state:
+    griglia = st.session_state.griglia
+    num_per_riga = 4
+    rows = [griglia[i:i+num_per_riga] for i in range(0, len(griglia), num_per_riga)]
 
-    if st.button("Mostra tutte le camere"):
-        query = ""
-        selected_cam = "-- Nessuna --"
-
-    if modo_compatto:
-        st.session_state.griglia = []
-
-    for cam, data in sorted(camere_ultime_foto.items()):
-        ts = data["timestamp"]
-        brasil_tz = pytz.timezone('America/Sao_Paulo')
-        now_brasil = datetime.now(brasil_tz)
-
-        if ts.tzinfo is None:
-            ts = brasil_tz.localize(ts)
-
-        diff_ore = (now_brasil - ts).total_seconds() // 3600
-        stato = "🟢" if diff_ore < 24 else "🔴"
-
-        if filtro_offline == "Sì" and stato == "🟢":
-            continue
-        if query and query not in cam.lower():
-            continue
-        if selected_cam != "-- Nessuna --" and cam != selected_cam:
-            continue
-
-        buffer = io.BytesIO()
-        try:
-            ftp.cwd(data["path"])
-            if data["filename"] in ftp.nlst():
-                ftp.retrbinary(f"RETR {data['filename']}", buffer.write)
-            else:
-                raise FileNotFoundError(f"File {data['filename']} non trovato in {data['path']}")
-
-            buffer.seek(0)
-            image = Image.open(buffer)
-
-            if modo_compatto:
-                st.session_state.griglia.append({
-                    "cam": cam,
-                    "img": image,
-                    "stato": stato,
-                    "timestamp": ts,
-                    "ore": int(diff_ore)
-                })
-            else:
-                with st.container():
-                    col1, col2 = st.columns([1, 2])
-                    with col1:
-                        st.image(image, caption=data["filename"], width=200)
-                    with col2:
-                        st.markdown(f"### {stato} {cam}")
-                        st.write(f"Ultima attività: `{ts.strftime('%Y-%m-%d %H:%M:%S')}`")
-                        st.write(f"Trascorse: `{int(diff_ore)} ore`")
-                st.markdown("---")
-
-        except Exception as e:
-            st.warning(f"Errore caricando immagine '{cam}': {e}")
-            continue
-
-    # --- GRIGLIA IMMAGINI COMPATTA ---
-    if modo_compatto and "griglia" in st.session_state:
-        griglia = st.session_state.griglia
-        num_per_riga = 4
-        rows = [griglia[i:i+num_per_riga] for i in range(0, len(griglia), num_per_riga)]
-
-        for row in rows:
-            cols = st.columns(len(row))
-            for idx, camera in enumerate(row):
-                with cols[idx]:
-                    st.image(camera["img"], use_container_width=True)
-                    st.markdown(f"**{camera['stato']} {camera['cam']}**")
-                    st.caption(f"{camera['timestamp'].strftime('%Y-%m-%d %H:%M:%S')} • {camera['ore']}h fa")
+    for row in rows:
+        cols = st.columns(len(row))
+        for idx, camera in enumerate(row):
+            with cols[idx]:
+                st.image(camera["img"], use_container_width=True)
+                st.markdown(f"**{camera['stato']} {camera['cam']}**")
+                st.caption(f"{camera['timestamp'].strftime('%Y-%m-%d %H:%M:%S')} • {camera['ore']}h fa")
 
 # --- CHIUSURA FTP ---
 try:
     ftp.quit()
 except:
     pass
+
