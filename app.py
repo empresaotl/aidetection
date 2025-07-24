@@ -62,5 +62,5 @@ try:
                     for giorno in giorni:
                         path_img = f"{cam_path}/{anno}/{mese}/{giorno}"
                         try:
-                            ftp.cwd(path
+ftp.cwd(path_img)
 
