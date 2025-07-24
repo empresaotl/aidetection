@@ -5,9 +5,9 @@ import pytz
 from PIL import Image
 import io
 import re
+from streamlit_autorefresh import st_autorefresh
 import json
 import os
-from streamlit_autorefresh import st_autorefresh
 
 # 🔄 AUTO REFRESH ogni 5 minuti
 st_autorefresh(interval=300000, key="aggiornamento")
@@ -32,13 +32,20 @@ def parse_nome_camera_e_data(nome_file):
         return None, None
     return None, None
 
-# --- SALVA CACHE LOCALE ---
+# --- SALVA E CARICA CACHE ---
 def salva_cache(data):
-    try:
-        with open(CACHE_FILE, "w") as f:
-            json.dump(data, f, indent=2, default=str)
-    except Exception as e:
-        st.warning(f"Errore salvataggio cache: {e}")
+    with open(CACHE_FILE, "w") as f:
+        json.dump(data, f, indent=2, default=str)
+
+def carica_cache():
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, "r") as f:
+            raw = json.load(f)
+        # Converti timestamp da stringa a datetime
+        for val in raw.values():
+            val["timestamp"] = datetime.strptime(val["timestamp"], "%Y-%m-%d %H:%M:%S")
+        return raw
+    return {}
 
 # --- UI setup ---
 st.set_page_config(page_title="Dashboard Telecamere", layout="wide")
@@ -55,64 +62,66 @@ except Exception as e:
     st.error(f"Errore FTP: {e}")
     st.stop()
 
-# --- RACCOLTA ultime immagini
+# --- RACCOLTA ultime immagini ---
 camere_ultime_foto = {}
+camere_ultime_foto = carica_cache()
 
-try:
-    ftp.cwd(ROOT_FOLDER)
-    camere = ftp.nlst()
+if not camere_ultime_foto:
+    try:
+        ftp.cwd(ROOT_FOLDER)
+        camere = ftp.nlst()
 
-    for cam_folder in sorted(camere):
-        cam_path = f"/{cam_folder}"
-        nome_cam_trovato = None
+        for cam_folder in sorted(camere):
+            cam_path = f"/{cam_folder}"
+            nome_cam_trovato = None
 
-        try:
-            ftp.cwd(cam_path)
-            anni = sorted(ftp.nlst(), reverse=True)
+            try:
+                ftp.cwd(cam_path)
+                anni = sorted(ftp.nlst(), reverse=True)
 
-            for anno in anni:
-                ftp.cwd(f"{cam_path}/{anno}")
-                mesi = sorted(ftp.nlst(), reverse=True)
+                for anno in anni:
+                    ftp.cwd(f"{cam_path}/{anno}")
+                    mesi = sorted(ftp.nlst(), reverse=True)
 
-                for mese in mesi:
-                    ftp.cwd(f"{cam_path}/{anno}/{mese}")
-                    giorni = sorted(ftp.nlst(), reverse=True)
+                    for mese in mesi:
+                        ftp.cwd(f"{cam_path}/{anno}/{mese}")
+                        giorni = sorted(ftp.nlst(), reverse=True)
 
-                    for giorno in giorni:
-                        path_img = f"{cam_path}/{anno}/{mese}/{giorno}"
+                        for giorno in giorni:
+                            path_img = f"{cam_path}/{anno}/{mese}/{giorno}"
 
-                        try:
-                            ftp.cwd(path_img)
-                            files = sorted([f for f in ftp.nlst() if f.endswith(".jpg")], reverse=True)
+                            try:
+                                ftp.cwd(path_img)
+                                files = sorted([f for f in ftp.nlst() if f.endswith(".jpg")], reverse=True)
 
-                            if not files:
+                                if not files:
+                                    continue
+
+                                ultima_img = files[0]
+                                nome_cam, timestamp = parse_nome_camera_e_data(ultima_img)
+
+                                if nome_cam and timestamp:
+                                    camere_ultime_foto[nome_cam] = {
+                                        "timestamp": timestamp,
+                                        "path": path_img,
+                                        "filename": ultima_img
+                                    }
+                                    nome_cam_trovato = nome_cam
+                                    break
+                            except:
                                 continue
-
-                            ultima_img = files[0]
-                            nome_cam, timestamp = parse_nome_camera_e_data(ultima_img)
-
-                            if nome_cam and timestamp:
-                                camere_ultime_foto[nome_cam] = {
-                                    "timestamp": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-                                    "path": path_img,
-                                    "filename": ultima_img
-                                }
-                                nome_cam_trovato = nome_cam
-                                break
-                        except:
-                            continue
+                        if nome_cam_trovato:
+                            break
                     if nome_cam_trovato:
                         break
-                if nome_cam_trovato:
-                    break
-        except:
-            continue
+            except:
+                continue
 
-except Exception as e:
-    st.error(f"Errore lettura camere: {e}")
+    except Exception as e:
+        st.error(f"Errore lettura camere: {e}")
 
-# ✅ Salva la cache dopo aver raccolto tutte le ultime immagini
-salva_cache(camere_ultime_foto)
+    # Salva su disco
+    salva_cache(camere_ultime_foto)
 
 # --- STATISTICHE E FILTRI ---
 if not camere_ultime_foto:
@@ -122,12 +131,13 @@ else:
     count_offline = 0
 
     for data in camere_ultime_foto.values():
-        ts = datetime.strptime(data["timestamp"], "%Y-%m-%d %H:%M:%S")
+        ts = data["timestamp"]
 
         brasil_tz = pytz.timezone('America/Sao_Paulo')
         now_brasil = datetime.now(brasil_tz)
 
-        ts = brasil_tz.localize(ts)
+        if ts.tzinfo is None:
+            ts = brasil_tz.localize(ts)
 
         ore = (now_brasil - ts).total_seconds() // 3600
 
@@ -159,10 +169,12 @@ else:
         st.session_state.griglia = []
 
     for cam, data in sorted(camere_ultime_foto.items()):
-        ts = datetime.strptime(data["timestamp"], "%Y-%m-%d %H:%M:%S")
+        ts = data["timestamp"]
         brasil_tz = pytz.timezone('America/Sao_Paulo')
         now_brasil = datetime.now(brasil_tz)
-        ts = brasil_tz.localize(ts)
+
+        if ts.tzinfo is None:
+            ts = brasil_tz.localize(ts)
 
         diff_ore = (now_brasil - ts).total_seconds() // 3600
         stato = "🟢" if diff_ore < 24 else "🔴"
