@@ -36,6 +36,7 @@ if not camere_ultime_foto:
 for cam, data in sorted(camere_ultime_foto.items()):
     try:
         ts = datetime.strptime(data["timestamp"], "%Y-%m-%d %H:%M:%S")
+        ts = pytz.timezone("America/Sao_Paulo").localize(ts)
         ore = (now_brasil - ts).total_seconds() // 3600
         stato = "🟢" if ore < 24 else "🔴"
 
