@@ -10,7 +10,7 @@ from streamlit_autorefresh import st_autorefresh
 st_autorefresh(interval=300000, key="aggiornamento")
 
 # --- CONFIG FTP ---
-FTP_HOST = "ftp.drivehq.com"
+FTP_HOST = "66.220.9.45"
 FTP_USER = "nicebr"
 FTP_PASS = "otl.123"
 ROOT_FOLDER = "/"
