@@ -1,6 +1,7 @@
 import streamlit as st
 from ftplib import FTP
 from datetime import datetime, timedelta
+import pytz
 from PIL import Image
 import io
 import re
@@ -31,6 +32,8 @@ def parse_nome_camera_e_data(nome_file):
 # --- UI setup ---
 st.set_page_config(page_title="Dashboard Telecamere", layout="wide")
 st.title("Dashboard - Ultima immagine per telecamera")
+ora_brasile = datetime.now(pytz.timezone('America/Sao_Paulo'))
+st.caption(f"Orario di riferimento (Brasilia): {ora_brasile.strftime('%Y-%m-%d %H:%M:%S')}")
 
 # --- CONNESSIONE FTP ---
 try:
@@ -106,7 +109,7 @@ else:
 
     for data in camere_ultime_foto.values():
         ts = data["timestamp"]
-        ore = (datetime.utcnow() - timedelta(hours=3) - ts).total_seconds() // 3600
+        ore = (datetime.now(pytz.timezone('America/Sao_Paulo')) - ts).total_seconds() // 3600
         if ore < 24:
             count_attive += 1
         else:
@@ -199,4 +202,3 @@ try:
     ftp.quit()
 except:
     pass
-
