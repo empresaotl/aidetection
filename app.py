@@ -123,7 +123,7 @@ if st.button("🔄 Forza aggiornamento da FTP"):
     camere_ultime_foto = aggiorna_da_ftp()
     if camere_ultime_foto:
         salva_cache(camere_ultime_foto)
-    st.experimental_rerun()
+   st.rerun()
 
 # === FILTRI E RICERCA ===
 query = st.text_input("🔍 Cerca per nome camera o cliente:", "").strip().lower()
