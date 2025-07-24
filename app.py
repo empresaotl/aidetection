@@ -109,7 +109,13 @@ else:
 
     for data in camere_ultime_foto.values():
         ts = data["timestamp"]
-        ore = (datetime.now(pytz.timezone('America/Sao_Paulo')) - ts).total_seconds() // 3600
+        brasil_tz = pytz.timezone('America/Sao_Paulo')
+now_brasil = datetime.now(brasil_tz)
+
+if ts.tzinfo is None:
+    ts = brasil_tz.localize(ts)
+
+ore = (now_brasil - ts).total_seconds() // 3600
         if ore < 24:
             count_attive += 1
         else:
@@ -139,7 +145,10 @@ else:
 
     for cam, data in sorted(camere_ultime_foto.items()):
         ts = data["timestamp"]
-        diff_ore = (datetime.now() - ts).total_seconds() // 3600
+        if ts.tzinfo is None:
+    ts = brasil_tz.localize(ts)
+
+diff_ore = (now_brasil - ts).total_seconds() // 3600
         stato = "🟢" if diff_ore < 24 else "🔴"
 
         if filtro_offline == "Sì" and stato == "🟢":
@@ -202,3 +211,4 @@ try:
     ftp.quit()
 except:
     pass
+
