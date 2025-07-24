@@ -1,68 +1,44 @@
+
 import streamlit as st
-from ftplib import FTP
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
+import json
 from PIL import Image
 import io
-import re
-import json
+from ftplib import FTP
 import os
-from streamlit_autorefresh import st_autorefresh
 
 # === CONFIG ===
 FTP_HOST = "66.220.9.45"
 FTP_USER = "nicebr"
 FTP_PASS = "otl.123"
-ROOT_FOLDER = "/"
-STORICO_FILE = "storico_immagini.json"
-TTL_CACHE = 300  # 5 minuti
+CACHE_FILE = "cache_ultime_foto.json"
 
-# === AUTO REFRESH ===
-st_autorefresh(interval=TTL_CACHE * 1000, key="aggiorna")
+# === FUNZIONE: Carica cache locale ===
+def carica_cache_locale():
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, "r") as f:
+            return json.load(f)
+    return {}
 
-# === PAGINA ===
-st.set_page_config(page_title="Dashboard Telecamere", layout="wide")
-ora_brasile = datetime.now(pytz.timezone('America/Sao_Paulo'))
-st.title("📈 Dashboard Amministratore")
-st.caption(f"🕒 Orario di riferimento (Brasilia): {ora_brasile.strftime('%Y-%m-%d %H:%M:%S')}")
-
-# === UTILS ===
-def parse_nome_camera_e_data(nome_file):
-    try:
-        match = re.match(r"(.+?)_00_(\d{14})\.jpg", nome_file)
-        if match:
-            nome_camera = match.group(1).strip()
-            timestamp_str = match.group(2)
-            timestamp = datetime.strptime(timestamp_str, "%Y%m%d%H%M%S")
-            return nome_camera, timestamp
-    except:
-        return None, None
-    return None, None
-
-# === CACHE FTP ===
-@st.cache_data(ttl=TTL_CACHE)
-def carica_ultime_foto():
-    camere_ultime_foto = {}
-
+# === FUNZIONE: Forza aggiornamento da FTP ===
+def aggiorna_cache_da_ftp():
+    dati = {}
     try:
         ftp = FTP(FTP_HOST)
         ftp.login(FTP_USER, FTP_PASS)
-        ftp.cwd(ROOT_FOLDER)
         camere = ftp.nlst()
-
         for cam_folder in sorted(camere):
             cam_path = f"/{cam_folder}"
-            nome_cam_trovato = None
-
             try:
                 ftp.cwd(cam_path)
-                anni = sorted(ftp.nlst(), reverse=True)
+                anni = sorted(ftp.nlst(), reverse=True)[:1]
                 for anno in anni:
                     ftp.cwd(f"{cam_path}/{anno}")
-                    mesi = sorted(ftp.nlst(), reverse=True)
+                    mesi = sorted(ftp.nlst(), reverse=True)[:1]
                     for mese in mesi:
                         ftp.cwd(f"{cam_path}/{anno}/{mese}")
-                        giorni = sorted(ftp.nlst(), reverse=True)
+                        giorni = sorted(ftp.nlst(), reverse=True)[:1]
                         for giorno in giorni:
                             path_img = f"{cam_path}/{anno}/{mese}/{giorno}"
                             try:
@@ -71,86 +47,69 @@ def carica_ultime_foto():
                                 if not files:
                                     continue
                                 ultima_img = files[0]
-                                nome_cam, timestamp = parse_nome_camera_e_data(ultima_img)
-                                if nome_cam and timestamp:
-                                    camere_ultime_foto[nome_cam] = {
-                                        "timestamp": timestamp,
-                                        "path": path_img,
-                                        "filename": ultima_img
-                                    }
-                                    nome_cam_trovato = nome_cam
-                                    break
+                                nome_camera = ultima_img.split("_00_")[0].strip()
+                                timestamp_str = ultima_img.split("_00_")[-1].replace(".jpg", "")
+                                timestamp = datetime.strptime(timestamp_str, "%Y%m%d%H%M%S")
+                                dati[nome_camera] = {
+                                    "timestamp": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                                    "path": path_img,
+                                    "filename": ultima_img
+                                }
+                                break
                             except:
                                 continue
-                        if nome_cam_trovato:
-                            break
-                    if nome_cam_trovato:
                         break
+                    break
             except:
                 continue
         ftp.quit()
     except Exception as e:
         st.error(f"Errore FTP: {e}")
-    return camere_ultime_foto
+        return {}
 
-# === STORICO ===
-def aggiorna_storico(camere_ultime_foto):
-    oggi = datetime.now().strftime("%Y-%m-%d")
-    storico = {}
-    if os.path.exists(STORICO_FILE):
-        with open(STORICO_FILE, "r") as f:
-            storico = json.load(f)
-    for cam, data in camere_ultime_foto.items():
-        storico.setdefault(cam, {})
-        storico[cam].setdefault(oggi, 0)
-        storico[cam][oggi] += 1
-    with open(STORICO_FILE, "w") as f:
-        json.dump(storico, f, indent=2)
+    with open(CACHE_FILE, "w") as f:
+        json.dump(dati, f, indent=2)
+    return dati
 
-# === MAIN ===
-camere_ultime_foto = carica_ultime_foto()
-if not camere_ultime_foto:
-    st.warning("⚠️ Nessuna immagine trovata.")
-    st.stop()
-
-aggiorna_storico(camere_ultime_foto)
-
-# === STATISTICHE ===
-count_attive = 0
-count_offline = 0
+# === UI ===
+st.set_page_config(page_title="Dashboard - Cache Locale", layout="wide")
+st.title("🗂️ Dashboard Cache Locale (Ultime Immagini)")
 brasil_tz = pytz.timezone('America/Sao_Paulo')
 now_brasil = datetime.now(brasil_tz)
+st.caption(f"🕒 Orario di riferimento (Brasilia): {now_brasil.strftime('%Y-%m-%d %H:%M:%S')}")
 
-for data in camere_ultime_foto.values():
-    ts = data["timestamp"]
-    if ts.tzinfo is None:
-        ts = brasil_tz.localize(ts)
-    ore = (now_brasil - ts).total_seconds() // 3600
-    if ore < 24:
-        count_attive += 1
-    else:
-        count_offline += 1
+if st.button("🔄 Forza aggiornamento da FTP"):
+    cache = aggiorna_cache_da_ftp()
+    st.success("Cache aggiornata.")
+else:
+    cache = carica_cache_locale()
 
-st.subheader(f"Totale camere: {len(camere_ultime_foto)} | ✅ Attive: {count_attive} | 🔴 Offline: {count_offline}")
+if not cache:
+    st.warning("⚠️ Nessuna immagine trovata.")
+else:
+    for cam, data in sorted(cache.items()):
+        try:
+            ts = datetime.strptime(data["timestamp"], "%Y-%m-%d %H:%M:%S")
+            ore = (now_brasil - ts).total_seconds() // 3600
+            stato = "🟢" if ore < 24 else "🔴"
+            st.markdown(f"### {stato} {cam}")
+            st.write(f"Ultima attività: `{data['timestamp']}` ({int(ore)}h fa)")
 
-# === BOTTONI ===
-col1, col2 = st.columns(2)
-with col1:
-    if st.button("🔄 Forza aggiornamento"):
-        st.cache_data.clear()
-        st.experimental_rerun()
+            # Prova a caricare l'immagine da FTP
+            try:
+                ftp = FTP(FTP_HOST)
+                ftp.login(FTP_USER, FTP_PASS)
+                ftp.cwd(data["path"])
+                buffer = io.BytesIO()
+                ftp.retrbinary(f"RETR {data['filename']}", buffer.write)
+                buffer.seek(0)
+                image = Image.open(buffer)
+                st.image(image, use_container_width=True)
+                ftp.quit()
+            except Exception as e:
+                st.error(f"Errore caricando immagine da FTP: {e}")
 
-with col2:
-    nome_sel = st.selectbox("📷 Scegli una telecamera per vedere storico:", ["--"] + sorted(camere_ultime_foto.keys()))
-
-# === GRAFICO STORICO PER CAMERA ===
-if nome_sel and nome_sel != "--":
-    if os.path.exists(STORICO_FILE):
-        with open(STORICO_FILE, "r") as f:
-            storico = json.load(f)
-        dati_cam = storico.get(nome_sel, {})
-        if dati_cam:
-            st.bar_chart(dati_cam)
-        else:
-            st.info("Nessun dato storico per questa camera.")
+            st.markdown("---")
+        except Exception as e:
+            st.warning(f"Errore dati per {cam}: {e}")
 
