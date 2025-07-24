@@ -107,21 +107,21 @@ else:
     count_attive = 0
     count_offline = 0
 
-        for data in camere_ultime_foto.values():
-        ts = data["timestamp"]
+    for data in camere_ultime_foto.values():
+    ts = data["timestamp"]
 
-        brasil_tz = pytz.timezone('America/Sao_Paulo')
-        now_brasil = datetime.now(brasil_tz)
+    brasil_tz = pytz.timezone('America/Sao_Paulo')
+    now_brasil = datetime.now(brasil_tz)
 
-        if ts.tzinfo is None:
-            ts = brasil_tz.localize(ts)
+    if ts.tzinfo is None:
+        ts = brasil_tz.localize(ts)
 
-        ore = (now_brasil - ts).total_seconds() // 3600
+    ore = (now_brasil - ts).total_seconds() // 3600
 
-        if ore < 24:
-            count_attive += 1
-        else:
-            count_offline += 1
+    if ore < 24:
+        count_attive += 1
+    else:
+        count_offline += 1
 
     st.subheader(f"Totale camere: {len(camere_ultime_foto)} | Attive: {count_attive} | Offline: {count_offline}")
 
@@ -213,4 +213,5 @@ try:
     ftp.quit()
 except:
     pass
+
 
