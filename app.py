@@ -149,7 +149,11 @@ else:
         buffer = io.BytesIO()
         try:
             ftp.cwd(data["path"])
-            ftp.retrbinary(f"RETR {data['filename']}", buffer.write)
+            if data["filename"] in ftp.nlst():
+                ftp.retrbinary(f"RETR {data['filename']}", buffer.write)
+            else:
+                raise FileNotFoundError(f"File {data['filename']} non trovato in {data['path']}")
+
             buffer.seek(0)
             image = Image.open(buffer)
 
@@ -193,6 +197,5 @@ else:
 # --- CHIUSURA FTP ---
 try:
     ftp.quit()
-except Exception as e:
-    st.warning(f"Connessione FTP chiusa con errore: {e}")
-
+except:
+    pass
