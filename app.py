@@ -4,75 +4,74 @@ from datetime import datetime
 from PIL import Image
 import io
 
-# --- CONFIGURAZIONE FTP ---
+# --- CONFIGURAÇÃO FTP ---
 FTP_HOST = "ftp.drivehq.com"
 FTP_USER = "otl.2020"
 FTP_PASS = "otl.123"
 BASE_FOLDER = "/REO_325"
-ANNO = "2025"
-MESE = "07"
+ANO = "2025"
+MES = "07"
 
-# --- Avvio ---
-st.title("🔧 Pannello Amministratore - Stato Telecamere")
-st.info("📡 Connessione al server FTP...")
+# --- INÍCIO ---
+st.title("🔧 Painel do Administrador - Câmeras Ativas")
+st.info("📡 Conectando ao servidor FTP...")
 
 try:
     ftp = FTP(FTP_HOST)
     ftp.login(FTP_USER, FTP_PASS)
-    st.success("✅ Connessione FTP riuscita")
+    st.success("✅ Conexão FTP bem-sucedida")
 except Exception as e:
-    st.error(f"❌ Errore nella connessione FTP: {e}")
+    st.error(f"❌ Erro na conexão FTP: {e}")
     st.stop()
 
-# --- Vai nella cartella base ---
+# --- LISTA TODAS AS CÂMERAS ---
 try:
     ftp.cwd(BASE_FOLDER)
-    camere = ftp.nlst()  # ['REO_Cam001', 'REO_Cam002', ...]
+    cameras = ftp.nlst()  # Exemplo: ['REO_32', 'REO_323', ...]
 
-    for cam in camere:
-        path_img = f"{BASE_FOLDER}/{cam}/{ANNO}/{MESE}"
+    for cam in sorted(cameras):
+        path_img = f"{BASE_FOLDER}/{cam}/{ANO}/{MES}"
 
         try:
             ftp.cwd(path_img)
-            files = ftp.nlst()
-            immagini = sorted([f for f in files if f.endswith(".jpg")], reverse=True)
+            arquivos = ftp.nlst()
+            imagens = sorted([f for f in arquivos if f.endswith(".jpg")], reverse=True)
 
-            if not immagini:
-                st.warning(f"🔴 {cam} - Nessuna immagine trovata.")
+            if not imagens:
+                st.warning(f"🔴 {cam} - Nenhuma imagem encontrada.")
                 continue
 
-            ultima_img = immagini[0]
-            timestamp_str = ultima_img.replace(".jpg", "")
-
+            ultima_imagem = imagens[0]
+            nome_sem_extensao = ultima_imagem.replace(".jpg", "")
             try:
-                timestamp = datetime.strptime(timestamp_str, "%Y-%m-%d_%H-%M-%S")
+                timestamp = datetime.strptime(nome_sem_extensao, "%Y-%m-%d_%H-%M-%S")
             except:
-                st.warning(f"📛 {cam} - Nome file non valido: {ultima_img}")
+                st.warning(f"📛 {cam} - Nome inválido: {ultima_imagem}")
                 continue
 
-            ore_passate = (datetime.now() - timestamp).total_seconds() // 3600
-            stato = "🟢" if ore_passate < 24 else "🔴"
+            horas_passadas = (datetime.now() - timestamp).total_seconds() // 3600
+            status = "🟢" if horas_passadas < 24 else "🔴"
 
             buffer = io.BytesIO()
-            ftp.retrbinary(f"RETR {ultima_img}", buffer.write)
+            ftp.retrbinary(f"RETR {ultima_imagem}", buffer.write)
             buffer.seek(0)
-            image = Image.open(buffer)
+            imagem = Image.open(buffer)
 
             with st.container():
                 col1, col2 = st.columns([1, 2])
                 with col1:
-                    st.image(image, caption=ultima_img, width=200)
+                    st.image(imagem, caption=ultima_imagem, width=200)
                 with col2:
-                    st.markdown(f"### {stato} {cam}")
-                    st.write(f"🕑 Ultima immagine: `{timestamp.strftime('%Y-%m-%d %H:%M:%S')}`")
-                    st.write(f"⏱️ Tempo trascorso: `{int(ore_passate)}h`")
+                    st.markdown(f"### {status} {cam}")
+                    st.write(f"🕑 Última imagem: `{timestamp.strftime('%Y-%m-%d %H:%M:%S')}`")
+                    st.write(f"⏱️ Tempo desde a última imagem: `{int(horas_passadas)}h`")
 
             st.markdown("---")
 
         except Exception as e:
-            st.error(f"⚠️ Errore con la camera {cam}: {e}")
+            st.error(f"⚠️ Erro com a câmera {cam}: {e}")
 
 except Exception as e:
-    st.error(f"⚠️ Errore nella cartella principale: {e}")
+    st.error(f"❌ Erro na listagem das câmeras: {e}")
 
 ftp.quit()
