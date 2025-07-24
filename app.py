@@ -6,7 +6,7 @@ import io
 import re
 
 # --- CONFIG ---
-FTP_HOST = "ftp.drivehq.com"
+FTP_HOST = "66.220.9.45"
 FTP_USER = "otl.2020"
 FTP_PASS = "otl.123"
 ROOT_FOLDER = "/"  # <- root reale
