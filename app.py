@@ -25,6 +25,78 @@ YOLO_MODEL_PATH = "yolov8n.pt" # NOVO: Caminho para o seu modelo YOLOv8
 # Garante que o diretório de cache local exista
 os.makedirs(LOCAL_IMAGE_CACHE_DIR, exist_ok=True)
 
+# === FUNÇÕES CACHE ===
+def salva_cache(data):
+    # Certifica-se de que a pasta CACHE_FILE existe (embora CACHE_FILE seja um arquivo, não uma pasta)
+    # A pasta para CACHE_FILE é a raiz do app.
+    # Certifica-se de que o diretório do arquivo de cache existe, se CACHE_FILE contiver um caminho.
+    cache_dir = os.path.dirname(CACHE_FILE)
+    if cache_dir and not os.path.exists(cache_dir):
+        os.makedirs(cache_dir)
+    
+    with open(CACHE_FILE, "w") as f:
+        json.dump(data, f, default=str, indent=2)
+
+def carica_cache():
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, "r") as f:
+                # Tenta carregar o JSON. Se estiver vazio ou inválido, isso lançará um erro.
+                content = f.read()
+                if not content.strip(): # Se o arquivo estiver vazio ou só com espaços em branco
+                    st.warning("Arquivo de cache vazio ou inválido. Forçando atualização do FTP.")
+                    return {} # Retorna vazio para forçar o recarregamento do FTP
+                return json.loads(content)
+        except json.JSONDecodeError as e:
+            st.error(f"❌ Erro ao decodificar o cache JSON '{CACHE_FILE}': {e}. O arquivo pode estar corrompido. Forçando atualização do FTP.")
+            # Opcional: tentar remover o arquivo corrompido para que um novo seja criado
+            try:
+                os.remove(CACHE_FILE)
+                st.info("Arquivo de cache corrompido removido.")
+            except Exception as remove_e:
+                st.warning(f"Não foi possível remover o arquivo de cache corrompido: {remove_e}")
+            return {} # Retorna vazio para que o fluxo principal tente atualizar do FTP
+        except Exception as e:
+            st.error(f"❌ Erro inesperado ao carregar o cache: {e}. Forçando atualização do FTP.")
+            return {}
+    return {}
+
+# ... (restante do seu código) ...
+
+# === CARICAMENTO DADOS PRINCIPAL ===
+carica_nuova_cache = False
+if st.button("🔄 Forçar atualização do FTP e reprocessar"):
+    st.cache_data.clear()
+    # Limpa o cache de imagens local também para garantir download fresco
+    for f in os.listdir(LOCAL_IMAGE_CACHE_DIR):
+        os.remove(os.path.join(LOCAL_IMAGE_CACHE_DIR, f))
+    
+    # NOVO: Remove explicitamente o arquivo de cache principal para forçar um novo
+    if os.path.exists(CACHE_FILE):
+        try:
+            os.remove(CACHE_FILE)
+            st.info("Arquivo de cache principal removido para forçar recriação.")
+        except Exception as e:
+            st.warning(f"Não foi possível remover o arquivo de cache principal: {e}")
+
+    carica_nuova_cache = True
+    st.success("✅ Cache forçado do FTP e imagens locais limpas.")
+
+if carica_nuova_cache:
+    camere_ultime_foto = aggiorna_cache_da_ftp() # Esta função já faz o cache local da imagem
+    salva_cache(camere_ultime_foto)
+else:
+    # A chamada a carica_cache() já lida com erros e retorna {} se o cache estiver inválido.
+    camere_ultime_foto = carica_cache() 
+    if not camere_ultime_foto: # Se o cache estiver vazio ou falhou ao carregar
+        st.warning("Cache vazio ou inválido. Tentando atualizar do FTP...")
+        camere_ultime_foto = aggiorna_cache_da_ftp() # Tenta buscar do FTP se o cache falhar
+        salva_cache(camere_ultime_foto) # Salva a nova cache
+    else:
+        st.success("📦 Cache carregado corretamente.")
+
+# ... (restante do código) ...
+
 # === AUTO REFRESH ===
 st_autorefresh(interval=TTL_CACHE * 1000, key="aggiorna")
 
