@@ -25,41 +25,6 @@ YOLO_MODEL_PATH = "yolov8n.pt" # NOVO: Caminho para o seu modelo YOLOv8
 # Garante que o diretório de cache local exista
 os.makedirs(LOCAL_IMAGE_CACHE_DIR, exist_ok=True)
 
-
-# === CARICAMENTO DADOS PRINCIPAL ===
-carica_nuova_cache = False
-if st.button("🔄 Forçar atualização do FTP e reprocessar"):
-    st.cache_data.clear()
-    # Limpa o cache de imagens local também para garantir download fresco
-    for f in os.listdir(LOCAL_IMAGE_CACHE_DIR):
-        os.remove(os.path.join(LOCAL_IMAGE_CACHE_DIR, f))
-    
-    # NOVO: Remove explicitamente o arquivo de cache principal para forçar um novo
-    if os.path.exists(CACHE_FILE):
-        try:
-            os.remove(CACHE_FILE)
-            st.info("Arquivo de cache principal removido para forçar recriação.")
-        except Exception as e:
-            st.warning(f"Não foi possível remover o arquivo de cache principal: {e}")
-
-    carica_nuova_cache = True
-    st.success("✅ Cache forçado do FTP e imagens locais limpas.")
-
-if carica_nuova_cache:
-    camere_ultime_foto = aggiorna_cache_da_ftp() # Esta função já faz o cache local da imagem
-    salva_cache(camere_ultime_foto)
-else:
-    # A chamada a carica_cache() já lida com erros e retorna {} se o cache estiver inválido.
-    camere_ultime_foto = carica_cache() 
-    if not camere_ultime_foto: # Se o cache estiver vazio ou falhou ao carregar
-        st.warning("Cache vazio ou inválido. Tentando atualizar do FTP...")
-        camere_ultime_foto = aggiorna_cache_da_ftp() # Tenta buscar do FTP se o cache falhar
-        salva_cache(camere_ultime_foto) # Salva a nova cache
-    else:
-        st.success("📦 Cache carregado corretamente.")
-
-# ... (restante do código) ...
-
 # === AUTO REFRESH ===
 st_autorefresh(interval=TTL_CACHE * 1000, key="aggiorna")
 
