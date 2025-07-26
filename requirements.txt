@@ -1,7 +1,6 @@
-streamlit==1.36.0 # Use a versão que você testou localmente
-streamlit-autorefresh==0.3.0
-ftplib
-Pillow==10.3.0
-pytz==2024.1
-opencv-python-headless==4.10.0.84 # Esta é crítica e pode falhar em ambientes específicos
-ultralytics==8.2.51 # Versão que você está usando
+streamlit
+streamlit-autorefresh
+Pillow
+pytz
+opencv-python-headless
+ultralytics
