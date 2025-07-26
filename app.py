@@ -25,43 +25,6 @@ YOLO_MODEL_PATH = "yolov8n.pt" # NOVO: Caminho para o seu modelo YOLOv8
 # Garante que o diretório de cache local exista
 os.makedirs(LOCAL_IMAGE_CACHE_DIR, exist_ok=True)
 
-# === FUNÇÕES CACHE ===
-def salva_cache(data):
-    # Certifica-se de que a pasta CACHE_FILE existe (embora CACHE_FILE seja um arquivo, não uma pasta)
-    # A pasta para CACHE_FILE é a raiz do app.
-    # Certifica-se de que o diretório do arquivo de cache existe, se CACHE_FILE contiver um caminho.
-    cache_dir = os.path.dirname(CACHE_FILE)
-    if cache_dir and not os.path.exists(cache_dir):
-        os.makedirs(cache_dir)
-    
-    with open(CACHE_FILE, "w") as f:
-        json.dump(data, f, default=str, indent=2)
-
-def carica_cache():
-    if os.path.exists(CACHE_FILE):
-        try:
-            with open(CACHE_FILE, "r") as f:
-                # Tenta carregar o JSON. Se estiver vazio ou inválido, isso lançará um erro.
-                content = f.read()
-                if not content.strip(): # Se o arquivo estiver vazio ou só com espaços em branco
-                    st.warning("Arquivo de cache vazio ou inválido. Forçando atualização do FTP.")
-                    return {} # Retorna vazio para forçar o recarregamento do FTP
-                return json.loads(content)
-        except json.JSONDecodeError as e:
-            st.error(f"❌ Erro ao decodificar o cache JSON '{CACHE_FILE}': {e}. O arquivo pode estar corrompido. Forçando atualização do FTP.")
-            # Opcional: tentar remover o arquivo corrompido para que um novo seja criado
-            try:
-                os.remove(CACHE_FILE)
-                st.info("Arquivo de cache corrompido removido.")
-            except Exception as remove_e:
-                st.warning(f"Não foi possível remover o arquivo de cache corrompido: {remove_e}")
-            return {} # Retorna vazio para que o fluxo principal tente atualizar do FTP
-        except Exception as e:
-            st.error(f"❌ Erro inesperado ao carregar o cache: {e}. Forçando atualização do FTP.")
-            return {}
-    return {}
-
-# ... (restante do seu código) ...
 
 # === CARICAMENTO DADOS PRINCIPAL ===
 carica_nuova_cache = False
