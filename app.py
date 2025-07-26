@@ -1,5 +1,5 @@
 import streamlit as st
-from ftplib import FTP, error_perm, error_temp # Importar erros específicos
+from ftplib import FTP, error_perm, error_temp # Importar erros específicos do ftplib
 from datetime import datetime, timedelta
 import pytz
 from PIL import Image, ImageDraw, ImageFont
@@ -7,6 +7,7 @@ import io
 import re
 import json
 import os
+import sys # Para verificar a plataforma
 from streamlit_autorefresh import st_autorefresh
 import numpy as np
 import cv2
@@ -18,9 +19,9 @@ FTP_USER = "nicebr"
 FTP_PASS = "otl.123"
 ROOT_FOLDER = "/"
 CACHE_FILE = "cache_ultime_foto.json"
-TTL_CACHE = 300  # 5 minutos
+TTL_CACHE = 300  # 5 minutos (intervalo de atualização automática e cache)
 LOCAL_IMAGE_CACHE_DIR = "cache_imagens_locais" # Diretório para cache local de imagens
-YOLO_MODEL_PATH = "yolov8n.pt" # Caminho para o seu modelo YOLOv8
+YOLO_MODEL_PATH = "yolov8n.pt" # Caminho para o seu modelo YOLOv8 (certifique-se de que está no mesmo diretório)
 
 # Garante que o diretório de cache local exista
 os.makedirs(LOCAL_IMAGE_CACHE_DIR, exist_ok=True)
@@ -34,10 +35,93 @@ ora_brasile = datetime.now(pytz.timezone('America/Sao_Paulo'))
 st.title("📸 Dashboard - Últimas Imagens por Telecâmera")
 st.caption(f"🕒 Horário de referência (Brasília): {ora_brasile.strftime('%Y-%m-%d %H:%M:%S')}")
 
+# === CSS CUSTOMIZADO PARA O VISUAL DO DASHBOARD (SIMILAR AO CAMERA FTP) ===
+custom_css = """
+<style>
+    /* Estilo geral para o corpo do aplicativo */
+    body {
+        font-family: 'Inter', sans-serif;
+        background-color: #1a1a1a; /* Fundo escuro */
+        color: #eee; /* Cor do texto principal */
+    }
+    /* Estilo para os cards de cada câmera */
+    .camera-card {
+        border: 1px solid #444; /* Borda sutil */
+        border-radius: 10px; /* Cantos arredondados */
+        padding: 15px;
+        margin-bottom: 20px;
+        box-shadow: 3px 3px 8px rgba(0, 0, 0, 0.4); /* Sombra para profundidade */
+        background-color: #262730; /* Fundo mais escuro para os cards */
+        display: flex;
+        flex-direction: column;
+        align-items: center; /* Centraliza o conteúdo */
+        text-align: center; /* Centraliza o texto */
+    }
+    /* Estilo para as imagens dentro dos cards */
+    .camera-card img {
+        border-radius: 8px; /* Cantos arredondados para as imagens */
+        width: 100%; /* Garante que a imagem ocupe a largura do card */
+        height: auto;
+        object-fit: cover; /* Garante que a imagem cubra a área sem distorcer */
+    }
+    /* Estilo para as informações de texto da câmera */
+    .camera-info {
+        font-size: 0.9em;
+        color: #bbb; /* Cor de texto mais clara para informações secundárias */
+        margin-top: 5px;
+    }
+    /* Estilo para o nome da câmera */
+    .camera-name {
+        font-size: 1.1em;
+        font-weight: bold;
+        color: #eee; /* Cor do nome da câmera */
+        margin-top: 10px;
+        margin-bottom: 5px;
+    }
+    /* Estilo para os botões */
+    .stButton>button {
+        background-color: #4CAF50; /* Verde */
+        color: white;
+        padding: 10px 20px;
+        text-align: center;
+        text-decoration: none;
+        display: inline-block;
+        font-size: 16px;
+        margin: 4px 2px;
+        cursor: pointer;
+        border-radius: 8px;
+        border: none;
+        box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.3);
+        transition: background-color 0.3s ease;
+    }
+    .stButton>button:hover {
+        background-color: #45a049;
+    }
+    .stCheckbox > label {
+        color: #eee; /* Cor do texto dos checkboxes */
+    }
+    .stTextInput > div > div > input {
+        border-radius: 8px;
+        border: 1px solid #444;
+        background-color: #333;
+        color: #eee;
+    }
+    .stExpander > div > div {
+        background-color: #333; /* Fundo do expander */
+        border-radius: 8px;
+        padding: 10px;
+        border: 1px solid #555;
+    }
+    .stExpander > div > div > p {
+        color: #ccc; /* Cor do texto dentro do expander */
+    }
+</style>
+"""
+st.markdown(custom_css, unsafe_allow_html=True)
+
 # === FUNÇÕES DE CACHE ===
 def salva_cache(data):
     """Salva os metadados das últimas fotos em um arquivo JSON."""
-    # Garante que o diretório do arquivo de cache existe, se CACHE_FILE contiver um caminho.
     cache_dir = os.path.dirname(CACHE_FILE)
     if cache_dir and not os.path.exists(cache_dir):
         os.makedirs(cache_dir)
@@ -61,7 +145,6 @@ def carica_cache():
                 return json.loads(content)
         except json.JSONDecodeError as e:
             st.error(f"❌ Erro ao decodificar o cache JSON '{CACHE_FILE}': {e}. O arquivo pode estar corrompido. Forçando atualização do FTP.")
-            # Opcional: tentar remover o arquivo corrompido para que um novo seja criado
             try:
                 os.remove(CACHE_FILE)
                 st.info("Arquivo de cache de metadados corrompido removido.")
@@ -84,28 +167,35 @@ def download_image_from_ftp_and_cache(ftp_session, remote_folder_path, filename)
     """
     local_path = get_local_image_path(filename)
     try:
-        # Se o arquivo já existe e tem tamanho, assumimos que está ok para simplificar
-        # Para produção, você poderia verificar o timestamp ou hash para garantir que é a versão mais recente
         if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
             st.info(f"Imagem '{filename}' já existe no cache local. Usando a versão em cache.")
             return local_path
 
         st.info(f"Baixando '{filename}' do FTP para cache local...")
         
-        # Cria um novo buffer para download em memória
-        buffer = io.BytesIO()
-        ftp_session.retrbinary(f"RETR {filename}", buffer.write)
-        buffer.seek(0)
+        # Salva o CWD atual para retornar depois
+        original_cwd = ftp_session.pwd()
+        try:
+            ftp_session.cwd(remote_folder_path) # Muda para o diretório da imagem
+            buffer = io.BytesIO()
+            ftp_session.retrbinary(f"RETR {filename}", buffer.write)
+            buffer.seek(0)
+            
+            with open(local_path, 'wb') as f:
+                f.write(buffer.getvalue())
+            
+            st.success(f"Imagem '{filename}' baixada e salva em {local_path}.")
+            return local_path
+        finally:
+            # Garante que volta ao diretório original
+            try:
+                ftp_session.cwd(original_cwd)
+            except Exception as e:
+                st.error(f"Erro ao retornar ao diretório FTP original após download: {e}")
+                # Se não conseguir voltar, a sessão pode estar comprometida
         
-        # Salva o conteúdo do buffer no arquivo local
-        with open(local_path, 'wb') as f:
-            f.write(buffer.getvalue())
-        
-        st.success(f"Imagem '{filename}' baixada e salva em {local_path}.")
-        return local_path
     except Exception as e:
         st.warning(f"Erro ao baixar ou salvar '{filename}' do FTP para cache local: {e}")
-        # Tenta remover o arquivo parcialmente baixado se houver um erro
         if os.path.exists(local_path):
             try:
                 os.remove(local_path)
@@ -130,7 +220,7 @@ def parse_nome_camera_e_data(nome_file):
     return None, None
 
 # === INICIALIZAÇÃO DO MODELO YOLO ===
-@st.cache_resource # Usa o cache de recursos do Streamlit para carregar o modelo uma vez
+@st.cache_resource
 def load_yolo_model():
     """Carrega o modelo YOLOv8."""
     try:
@@ -158,35 +248,25 @@ def process_image_with_yolo(pil_image):
     if pil_image is None:
         return None, "Imagem inválida para YOLO", [], False
 
-    # Converte PIL Image para array numpy (BGR para OpenCV)
     img_np = np.array(pil_image)
     img_cv2 = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
 
     detections_info = []
-    alert_status = "✅ OK" # Status padrão de EPI
+    alert_status = "✅ OK"
     alert_triggered = False
 
     try:
-        # Executa a inferência
-        # conf=0.25 é um bom default, ajuste conforme a necessidade de precisão vs. falsos positivos
         results = yolo_model(img_cv2, verbose=False, conf=0.25) 
 
-        annotated_image = pil_image # Imagem original caso não haja detecções ou anotações
-        
-        # Exemplo de classes de EPI que você espera detectar (ajuste conforme seu modelo)
-        # Você precisará mapear os nomes das classes do seu modelo YOLO para o que você quer monitorar
-        # Para saber os nomes das classes do seu modelo, você pode inspecionar yolo_model.names
+        annotated_image = pil_image
         
         REQUIRED_EPIS = {
-            'helmet': False, # Flag para verificar se capacete foi encontrado
-            'safety_vest': False # Flag para verificar se colete foi encontrado
-            # Adicione outros EPIs que você monitora aqui
+            'helmet': False,
+            'safety_vest': False
         }
         
-        # Processa apenas o primeiro resultado (para uma única imagem)
         if results:
             r = results[0] 
-            # r.plot() já retorna a imagem com as caixas desenhadas
             annotated_frame_cv2 = r.plot() 
             annotated_image = Image.fromarray(cv2.cvtColor(annotated_frame_cv2, cv2.COLOR_BGR2RGB))
 
@@ -200,28 +280,24 @@ def process_image_with_yolo(pil_image):
                     f"Detectado: {class_name} (Confiança: {conf:.2f})"
                 )
                 
-                # Atualiza flags para EPIs necessários
-                if class_name == 'helmet': # Ajuste 'helmet' para o nome exato da classe do seu modelo
+                if class_name == 'helmet':
                     REQUIRED_EPIS['helmet'] = True
-                if class_name == 'safety_vest': # Ajuste 'safety_vest' para o nome exato da classe do seu modelo
+                if class_name == 'safety_vest':
                     REQUIRED_EPIS['safety_vest'] = True
 
-        # Lógica de alerta baseada nos EPIs esperados
-        # ESTA LÓGICA DEVE SER AJUSTADA CONFORME SUAS REGRAS DE NEGÓCIO
-        if not REQUIRED_EPIS['helmet']: # Se capacete não foi detectado
+        if not REQUIRED_EPIS['helmet']:
             alert_status = "🚨 Alerta: Capacete AUSENTE!"
             alert_triggered = True
-        elif not REQUIRED_EPIS['safety_vest']: # Se colete não foi detectado (e capacete foi, se a regra for essa)
+        elif not REQUIRED_EPIS['safety_vest']:
             alert_status = "⚠️ Atenção: Colete AUSENTE!"
             alert_triggered = True
         
-        # Se nenhuma detecção específica de EPI foi feita, mas não há um alerta crítico
         if not alert_triggered and not detections_info:
             alert_status = "ℹ️ Nenhum EPI detectado (ou não aplicável)"
 
     except Exception as e:
         st.error(f"Erro durante o processamento YOLO: {e}")
-        return pil_image, "Erro no processamento YOLO", [], True # Força alerta em caso de erro no YOLO
+        return pil_image, "Erro no processamento YOLO", [], True
 
     return annotated_image, alert_status, detections_info, alert_triggered
 
@@ -233,7 +309,7 @@ def aggiorna_cache_da_ftp():
     """
     camere_ultime_foto = {}
     st.info("Iniciando atualização de cache do FTP...")
-    ftp = None # Inicializa ftp como None
+    ftp = None
     try:
         st.info(f"Conectando ao FTP: {FTP_HOST} com usuário {FTP_USER}")
         ftp = FTP(FTP_HOST)
@@ -241,104 +317,90 @@ def aggiorna_cache_da_ftp():
         st.info(f"Login FTP bem-sucedido. Mudando para ROOT_FOLDER: {ROOT_FOLDER}")
         ftp.cwd(ROOT_FOLDER)
         
-        # Obter a lista de diretórios (câmeras)
         try:
             camere = ftp.nlst()
             st.info(f"Encontrados {len(camere)} diretórios (câmeras).")
-        except error_perm as e: # Erro de permissão FTP
-            st.error(f"Erro de permissão FTP ao listar diretórios no ROOT_FOLDER: {e}. Verifique se o usuário tem acesso ao caminho raíz ('{ROOT_FOLDER}').")
+        except (error_perm, error_temp) as e:
+            st.error(f"Erro de permissão/conexão FTP ao listar diretórios no ROOT_FOLDER: {e}. Verifique as permissões ou o caminho.")
             return {}
         except Exception as e:
             st.error(f"Erro inesperado ao listar diretórios no ROOT_FOLDER: {e}. Verifique a conectividade ou o caminho.")
             return {}
 
         for cam_folder in sorted(camere):
-            # Ignorar arquivos ou entradas que não são pastas de câmera (se houver)
-            # Uma heurística simples é verificar se o nome tem extensão de arquivo ou caracteres inválidos para pasta
-            if '.' in cam_folder: 
-                st.info(f"Pulando entrada '{cam_folder}' no ROOT_FOLDER (parece ser um arquivo).")
+            # Heurística para pular o que não parece ser pasta de câmera (ex: arquivos na raiz)
+            if '.' in cam_folder or not cam_folder: 
+                st.info(f"Pulando entrada '{cam_folder}' no ROOT_FOLDER (parece ser um arquivo ou vazio).")
                 continue
 
             cam_path = f"/{cam_folder}"
-            nome_cam_trovado = None
             st.info(f"Processando pasta da câmera: {cam_folder}")
 
+            # Salva o diretório atual do FTP (ROOT_FOLDER) para retornar depois
+            original_cwd_before_cam = ftp.pwd() 
+            
             try:
-                # Tenta mudar para o diretório da câmera
-                current_ftp_dir = ftp.pwd() # Salva o diretório atual do FTP
                 ftp.cwd(cam_path)
                 st.info(f"Entrou na pasta: {cam_path}")
                 
-                # Procura o ano mais recente
                 anni = sorted(ftp.nlst(), reverse=True)
                 if not anni:
                     st.warning(f"Nenhum ano encontrado para a câmera {cam_folder}. Pulando.")
-                    ftp.cwd(current_ftp_dir) # Volta ao diretório anterior
-                    continue
+                    continue # Continua para a próxima câmera
                 
-                found_image_for_cam = False # Flag para saber se achamos imagem para esta câmera
+                found_image_for_cam = False 
                 for anno in anni:
-                    # Verifica se 'anno' é realmente um diretório de ano (ex: '2025')
                     if not anno.isdigit() or len(anno) != 4:
                         st.warning(f"Entrada '{anno}' não parece ser um diretório de ano válido para {cam_folder}. Pulando.")
-                        continue # Pula esta entrada, tenta a próxima
+                        continue
 
                     st.info(f"Procurando no ano: {anno} para {cam_folder}")
+                    current_anno_path = f"{cam_path}/{anno}" 
                     try:
-                        ftp.cwd(f"{cam_path}/{anno}")
-                    except error_perm as e:
-                        st.warning(f"Permissão negada ou pasta '{anno}' não acessível para {cam_folder}: {e}. Pulando este ano.")
-                        ftp.cwd(cam_path) # Tenta voltar para a pasta da câmera
-                        continue
+                        ftp.cwd(current_anno_path)
+                    except (error_perm, error_temp) as e:
+                        st.warning(f"Erro FTP ao acessar pasta do ano '{anno}' para {cam_folder}: {e}. Pulando este ano.")
+                        continue # Continua para o próximo ano
                     except Exception as e:
                         st.warning(f"Não foi possível acessar a pasta do ano {anno} para {cam_folder}: {e}. Pulando este ano.")
-                        ftp.cwd(cam_path) # Tenta voltar para a pasta da câmera
                         continue
                     
-                    # Procura o mês mais recente
                     mesi = sorted(ftp.nlst(), reverse=True)
                     if not mesi:
                         st.warning(f"Nenhum mês encontrado para a câmera {cam_folder} no ano {anno}. Pulando.")
-                        ftp.cwd(cam_path) # Tenta voltar para a pasta da câmera
-                        continue
+                        continue # Continua para o próximo mês
 
                     for mese in mesi:
-                        # Verifica se 'mese' é um diretório de mês válido (ex: '01' a '12')
                         if not mese.isdigit() or not (1 <= int(mese) <= 12):
                             st.warning(f"Entrada '{mese}' não parece ser um diretório de mês válido para {cam_folder}/{anno}. Pulando.")
-                            continue # Pula esta entrada
+                            continue
 
                         st.info(f"Procurando no mês: {mese} para {cam_folder}/{anno}")
+                        current_mese_path = f"{cam_path}/{anno}/{mese}" 
                         try:
-                            ftp.cwd(f"{cam_path}/{anno}/{mese}")
-                        except error_perm as e:
-                            st.warning(f"Permissão negada ou pasta '{mese}' não acessível para {cam_folder}/{anno}: {e}. Pulando este mês.")
-                            ftp.cwd(f"{cam_path}/{anno}") # Tenta voltar para a pasta do ano
-                            continue
+                            ftp.cwd(current_mese_path)
+                        except (error_perm, error_temp) as e:
+                            st.warning(f"Erro FTP ao acessar pasta do mês '{mese}' para {cam_folder}/{anno}: {e}. Pulando este mês.")
+                            continue # Continua para o próximo mês
                         except Exception as e:
                             st.warning(f"Não foi possível acessar a pasta do mês {mese} para {cam_folder}/{anno}: {e}. Pulando este mês.")
-                            ftp.cwd(f"{cam_path}/{anno}") # Tenta voltar para a pasta do ano
                             continue
 
-                        # Procura o dia mais recente
                         giorni = sorted(ftp.nlst(), reverse=True)
                         if not giorni:
                             st.warning(f"Nenhum dia encontrado para a câmera {cam_folder} em {anno}/{mese}. Pulando.")
-                            ftp.cwd(f"{cam_path}/{anno}") # Tenta voltar para a pasta do ano
-                            continue
+                            continue # Continua para o próximo dia
 
                         for giorno in giorni:
-                            # Verifica se 'giorno' é um diretório de dia válido (ex: '01' a '31')
                             if not giorno.isdigit() or not (1 <= int(giorno) <= 31):
                                 st.warning(f"Entrada '{giorno}' não parece ser um diretório de dia válido para {cam_folder}/{anno}/{mese}. Pulando.")
-                                continue # Pula esta entrada
+                                continue
 
                             path_img_ftp = f"{cam_path}/{anno}/{mese}/{giorno}"
                             st.info(f"Procurando em: {path_img_ftp}")
                             try:
-                                # Aqui, ao invés de usar ftp.cwd(path_img_ftp), vamos passar o caminho completo
-                                # e fazer o download_image_from_ftp_and_cache gerenciar o cwd temporariamente
-                                # Isso é para evitar problemas se o cwd falhar repetidamente.
+                                # Muda para o diretório do dia para listar arquivos
+                                ftp.cwd(path_img_ftp) 
                                 files = sorted([f for f in ftp.nlst() if f.endswith(".jpg")], reverse=True)
                                 if not files:
                                     st.warning(f"Nenhum arquivo JPG encontrado em {path_img_ftp}. Pulando.")
@@ -350,7 +412,6 @@ def aggiorna_cache_da_ftp():
                                 if nome_cam and timestamp:
                                     st.info(f"Parseado: Câmera={nome_cam}, Timestamp={timestamp}")
                                     
-                                    # Baixa e salva a imagem no cache local (passando o full path para download_image_from_ftp_and_cache)
                                     local_image_file = download_image_from_ftp_and_cache(ftp, path_img_ftp, ultima_img)
                                     if local_image_file:
                                         camere_ultime_foto[nome_cam] = {
@@ -359,30 +420,33 @@ def aggiorna_cache_da_ftp():
                                             "filename_ftp": ultima_img,
                                             "path_local": local_image_file
                                         }
-                                        nome_cam_trovado = nome_cam
-                                        found_image_for_cam = True
+                                        found_image_for_cam = True # Imagem encontrada para esta câmera
                                         break # Sai do loop de dias, pois encontrou a última imagem
                                     else:
                                         st.warning(f"Falha ao baixar {ultima_img} para o cache local. Esta imagem não será exibida.")
                                 else:
                                     st.warning(f"Não foi possível parsear o nome da câmera ou timestamp para: {ultima_img}. Pulando.")
+                            except (error_perm, error_temp) as e:
+                                st.warning(f"Erro FTP ao processar arquivos em {path_img_ftp}: {e}. Pulando este diretório.")
                             except Exception as e:
-                                st.warning(f"Erro ao listar/processar arquivos em {path_img_ftp}: {e}. Pulando este diretório.")
+                                st.warning(f"Erro inesperado ao processar arquivos em {path_img_ftp}: {e}. Pulando este diretório.")
                             finally:
-                                # Após tentar processar o dia, volta para a pasta do mês
+                                # Sempre tenta voltar para a pasta do mês após processar um dia
                                 try:
-                                    ftp.cwd(f"{cam_path}/{anno}/{mese}") 
+                                    ftp.cwd(current_mese_path) 
                                 except Exception as e:
-                                    st.error(f"Erro ao retornar para a pasta do mês '{mese}': {e}. Tentando retornar ao ROOT_FOLDER da câmera.")
-                                    ftp.cwd(cam_path) # Tenta voltar para a raiz da câmera
-                                    break # Sai do loop de dias
+                                    st.error(f"Erro ao retornar para a pasta do mês '{mese}': {e}. Isso pode indicar uma conexão instável.")
+                                    # Se não conseguir voltar, a sessão pode estar comprometida.
+                                    # Forçamos a saída para a próxima câmera ou para o final.
+                                    found_image_for_cam = True # Sinaliza para sair dos loops aninhados
+                                    break 
 
                         if found_image_for_cam:
-                            break # Sai do loop de meses (pois achou a imagem da câmera)
+                            break # Sai do loop de meses
                     if found_image_for_cam:
-                        break # Sai do loop de anos (pois achou a imagem da câmera)
+                        break # Sai do loop de anos
                 
-                if not found_image_for_cam: # Se não encontrou imagem após varrer tudo para esta câmera
+                if not found_image_for_cam:
                     st.warning(f"Nenhuma imagem válida encontrada para a câmera {cam_folder} após varrer todos os diretórios de data.")
                 
             except Exception as e:
@@ -397,8 +461,8 @@ def aggiorna_cache_da_ftp():
 
         st.info("Varredura FTP concluída.")
         
-    except error_perm as e:
-        st.error(f"Erro de permissão FTP geral: {e}. Verifique as credenciais ou permissões de diretório.")
+    except (error_perm, error_temp) as e:
+        st.error(f"Erro de permissão/conexão FTP crítico: {e}. Verifique as credenciais ou a conectividade.")
     except Exception as e:
         st.error(f"Erro crítico na conexão ou operação FTP: {e}. Verifique as credenciais ou a conectividade.")
     finally:
@@ -415,9 +479,8 @@ def aggiorna_cache_da_ftp():
 # === CARREGAMENTO DE DADOS PRINCIPAL ===
 carica_nuova_cache = False
 if st.button("🔄 Forçar atualização do FTP e reprocessar"):
-    st.cache_data.clear() # Limpa o cache de dados do Streamlit
+    st.cache_data.clear()
     
-    # Limpa o cache de imagens local
     for f in os.listdir(LOCAL_IMAGE_CACHE_DIR):
         try:
             os.remove(os.path.join(LOCAL_IMAGE_CACHE_DIR, f))
@@ -425,7 +488,6 @@ if st.button("🔄 Forçar atualização do FTP e reprocessar"):
             st.warning(f"Não foi possível remover arquivo de cache local {f}: {e}")
     st.info("Cache de imagens locais limpo.")
     
-    # Remove explicitamente o arquivo de cache principal para forçar um novo
     if os.path.exists(CACHE_FILE):
         try:
             os.remove(CACHE_FILE)
@@ -441,7 +503,7 @@ if carica_nuova_cache:
     salva_cache(camere_ultime_foto)
 else:
     camere_ultime_foto = carica_cache() 
-    if not camere_ultime_foto: # Se o cache estiver vazio ou falhou ao carregar
+    if not camere_ultime_foto:
         st.warning("Cache vazio ou inválido. Tentando atualizar do FTP...")
         camere_ultime_foto = aggiorna_cache_da_ftp()
         salva_cache(camere_ultime_foto)
@@ -451,7 +513,7 @@ else:
 
 if not camere_ultime_foto:
     st.warning("⚠️ Nenhuma imagem encontrada ou erro no FTP/cache. Por favor, tente forçar a atualização.")
-    st.stop() # Interrompe a execução se não houver dados
+    st.stop()
 
 # === ANÁLISE GERAL E PRÉ-PROCESSAMENTO ===
 brasil_tz = pytz.timezone('America/Sao_Paulo')
@@ -468,8 +530,14 @@ for cam, data in camere_ultime_foto.items():
     ore = diff.total_seconds() / 3600
     giorni = int(diff.days)
 
-    # Status de atividade da câmera (verde/vermelho)
     stato_operacional = "🟢" if ore < 24 else "🔴"
+    
+    # Calcula a descrição com base nos dias/horas de inatividade
+    if giorni >= 1:
+        descrizione_atividade = f"{giorni} dia{'s' if giorni != 1 else ''} atrás"
+    else:
+        descrizione_atividade = f"{int(ore)}h atrás"
+
 
     image_pil = None
     if data.get("path_local") and os.path.exists(data["path_local"]):
@@ -481,7 +549,6 @@ for cam, data in camere_ultime_foto.items():
     else:
         st.warning(f"Caminho da imagem local não encontrado ou arquivo ausente para {cam}: {data.get('path_local', 'N/A')}")
     
-    # Processa a imagem com YOLO AQUI
     processed_image, epi_alert_status, epi_detections_list, is_alert_triggered = (
         process_image_with_yolo(image_pil) if image_pil else (None, "Imagem não disponível", [], False)
     )
@@ -495,14 +562,14 @@ for cam, data in camere_ultime_foto.items():
         count_alertas_epi += 1
 
     processed_cam_data[cam] = {
-        "img": processed_image, # Imagem já processada pelo YOLO
+        "img": processed_image,
         "stato": stato_operacional,
         "timestamp": ts.strftime("%Y-%m-%d %H:%M:%S"),
-        "descrizione": f"{giorni} dia{'s' if giorni != 1 else ''} atrás" if giorni >= 1 else f"{int(ore)}h atrás",
+        "descrição": descrizione_atividade, # Corrigido: 'descrição' agora está presente
         "epi_alert": epi_alert_status,
         "epi_detections": epi_detections_list,
         "is_alert_triggered": is_alert_triggered,
-        "cam": cam # GARANTIR que 'cam' esteja sempre presente no dicionário
+        "cam": cam 
     }
 
 st.subheader(f"Total de câmeras: {len(processed_cam_data)} | ✅ Ativas: {count_attive} | 🔴 Offline: {count_offline} | 🚨 Alertas EPI: {count_alertas_epi}")
@@ -533,22 +600,43 @@ else:
     # === RENDERIZAÇÃO ===
     if modo_compatto:
         num_per_riga = 4
-        for i in range(0, len(risultati_filtrati), num_per_riga):
-            cols = st.columns(num_per_riga)
-            for j, item in enumerate(risultati_filtrati[i:i+num_per_riga]):
-                with cols[j]:
-                    if item["img"] is not None:
-                        st.image(item["img"], use_container_width=True, caption=f"{item['epi_alert']}")
-                    else:
-                        st.warning("Imagem não disponível.")
-                    # AQUI: item['cam'] deve sempre existir agora
-                    st.markdown(f"**{item['stato']} {item['cam']}**")
-                    st.caption(f"{item['timestamp']} • {item['descrição']}")
-                    if item["epi_detections"]:
-                        with st.expander("Det. EPI"): # Expander compacto
-                            for det in item["epi_detections"]:
-                                st.markdown(f"- {det}")
-    else:
+        # Use st.columns para criar uma grade responsiva
+        cols = st.columns(num_per_riga) 
+        col_idx = 0
+        for item in risultati_filtrati:
+            with cols[col_idx]:
+                # Injeta HTML para o card da câmera
+                st.markdown(f"""
+                <div class="camera-card">
+                    <div class="camera-name">{item['cam']}</div>
+                    <div class="camera-info">
+                        Última atividade: {item['timestamp']}
+                    </div>
+                    <div class="camera-info">
+                        Inativa desde: {item['descrição']}
+                    </div>
+                    <div class="camera-info">
+                        Status: {item['stato']} {item['epi_alert']}
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                if item["img"] is not None:
+                    st.image(item["img"], use_container_width=True, caption="") # Removido caption duplicado
+                else:
+                    st.warning("Imagem não disponível.")
+                
+                # Fechar a div do card
+                st.markdown("</div>", unsafe_allow_html=True)
+
+                if item["epi_detections"]:
+                    with st.expander("Detalhes da Detecção EPI"):
+                        for det in item["epi_detections"]:
+                            st.markdown(f"- {det}")
+            
+            col_idx = (col_idx + 1) % num_per_riga # Move para a próxima coluna
+            if col_idx == 0: # Se voltou para a primeira coluna, significa que uma linha foi preenchida
+                cols = st.columns(num_per_riga) # Cria uma nova linha de colunas
+    else: # Modo de lista (original)
         for item in risultati_filtrati:
             with st.container():
                 col1, col2 = st.columns([1, 2])
@@ -558,10 +646,9 @@ else:
                     else:
                         st.warning("Imagem não disponível.")
                 with col2:
-                    # AQUI: item['cam'] deve sempre existir agora
                     st.markdown(f"### {item['stato']} {item['epi_alert']} {item['cam']}")
                     st.write(f"Última atividade: `{item['timestamp']}`")
-                    st.write(f"Inativa desde: `{item['descrição']}`")
+                    st.write(f"Inativa desde: `{item['descrição']}`") 
                     if item["epi_detections"]:
                         with st.expander("Detalhes da Detecção EPI"):
                             for det in item["epi_detections"]:
