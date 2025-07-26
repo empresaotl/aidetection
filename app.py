@@ -1,12 +1,3 @@
-Você tem razão\! Peço desculpas. Ao refatorar o código, algumas das informações de status e descrição de tempo podem ter sido perdidas ou o acesso a elas pode ter mudado. Analisei o código novamente para garantir que as informações de tempo de atividade e inatividade sejam exibidas corretamente.
-
-A principal causa do problema que você mencionou é que, na lógica da "Renderização", a variável `item['descrição']` pode não estar sendo exibida ou formatada da mesma forma que antes.
-
-Além disso, ajustei a forma como as informações são passadas para `processed_cam_data` para garantir que `'descrição'` e `'stato'` estejam sempre presentes e consistentes.
-
-Aqui está o código `app.py` completo e atualizado, com a correção para a exibição das informações de tempo de atividade/inatividade:
-
-```python
 import streamlit as st
 from ftplib import FTP, error_perm, error_temp
 from datetime import datetime, timedelta
