@@ -1,3 +1,7 @@
 streamlit
-Pillow
 streamlit-autorefresh
+ftplib
+Pillow
+pytz
+opencv-python-headless
+ultralytics
