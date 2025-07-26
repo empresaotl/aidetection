@@ -5,3 +5,4 @@ pytz
 opencv-python-headless
 ultralytics
 opencv-python
+opencv-python-headless
